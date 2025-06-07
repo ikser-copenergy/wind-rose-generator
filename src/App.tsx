@@ -1,10 +1,3 @@
-// Requisitos: React + Vite + Axios + xlsx + TypeScript
-// 1. Ejecutar en consola:
-//    npm create vite@latest ambient-weather-excel --template react-ts
-//    cd ambient-weather-excel
-//    npm install axios xlsx dayjs
-//    npm run dev
-
 import { useState } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
@@ -18,6 +11,7 @@ interface WindRecord {
   hora: string;
   direccion: string;
   velocidad: string;
+  interpolado: string;
 }
 
 interface ApiData {
@@ -38,17 +32,11 @@ export default function App() {
   const handleExport = async () => {
     const now = dayjs();
     const endDate = now.startOf('day');
-
-    // Solo últimos 3 días para pruebas
     const startDate = endDate.subtract(3, 'day');
-
-    // Para exportar el mes anterior completo, usar esto en su lugar:
-    // const startDate = now.subtract(1, 'month').startOf('month');
-    // const endDate = startDate.endOf('month');
 
     setLoading(true);
     try {
-      let allData: { date: string; timestamp: Dayjs; windspeed: number; winddir: number }[] = [];
+      let allData: { date: string; timestamp: Dayjs; windspeed: number | null; winddir: number | null }[] = [];
       for (let d = startDate; d.isBefore(endDate); d = d.add(1, 'day')) {
         const url = `https://api.ambientweather.net/v1/devices/${MAC_ADDRESS}`;
         const params = {
@@ -62,23 +50,18 @@ export default function App() {
 
         const processed = response.data.map((d) => {
           const ts = dayjs(d.date);
-            
-          let formatedData = {
+          return {
             date: d.date,
             timestamp: ts,
-            windspeed: d.windspeedmph,
-            winddir: d.winddir,
-          }
-          
-          return formatedData;
-
+            windspeed: d.windspeedmph ?? null,
+            winddir: d.winddir ?? null,
+          };
         });
 
         allData.push(...processed);
-        await delay(1000); // Espera 1 segundo para evitar el error 429
+        await delay(1000);
       }
 
-      // Agrupar por hora
       const hourlyMap: Record<string, typeof allData> = {};
       allData.forEach((entry) => {
         const hourKey = entry.timestamp.startOf('hour').format('YYYY-MM-DD HH:00');
@@ -86,22 +69,29 @@ export default function App() {
         hourlyMap[hourKey].push(entry);
       });
 
-      // Promediar datos por hora
-      const hourlyAverages: Record<string, { ts: Dayjs; speed: number; dir: number }> = {};
+      const hourlyAverages: Record<string, { ts: Dayjs; speed: number | null; dir: number | null }> = {};
       for (const key in hourlyMap) {
         const group = hourlyMap[key];
         const ts = dayjs(key);
-        const avgSpeed = group.reduce((a, b) => a + b.windspeed, 0) / group.length;
-        const avgDir = group.reduce((a, b) => a + b.winddir, 0) / group.length;
+
+        const validSpeed = group.map(e => e.windspeed).filter(v => v !== null) as number[];
+        const validDir = group.map(e => e.winddir).filter(v => v !== null) as number[];
+
+        const avgSpeed = validSpeed.length > 0 ? validSpeed.reduce((a, b) => a + b, 0) / validSpeed.length : null;
+        const avgDir = validDir.length > 0 ? validDir.reduce((a, b) => a + b, 0) / validDir.length : null;
+
         hourlyAverages[key] = { ts, speed: avgSpeed, dir: avgDir };
       }
 
       const filledRecords: WindRecord[] = [];
-      for (let h = startDate.startOf('hour'); h.isBefore(endDate.endOf('day')); h = h.add(1, 'hour')) {
+      const totalHours = endDate.endOf('day').diff(startDate.startOf('hour'), 'hour');
+
+      for (let i = 0; i <= totalHours; i++) {
+        const h = startDate.startOf('hour').add(i, 'hour');
         const key = h.format('YYYY-MM-DD HH:00');
         const current = hourlyAverages[key];
 
-        if (current) {
+        if (current && current.speed !== null && current.dir !== null) {
           filledRecords.push({
             fecha: h.format('YYYY/MM/DD HH:mm'),
             año: h.format('YYYY'),
@@ -110,17 +100,19 @@ export default function App() {
             hora: h.format('HH'),
             direccion: current.dir.toFixed(3),
             velocidad: current.speed.toFixed(3),
+            interpolado: "",
           });
         } else {
           const prev = filledRecords[filledRecords.length - 1];
           let next: { velocidad: number; direccion: number } | undefined;
 
-          for (let i = 1; i <= 48; i++) {
-            const futureKey = h.add(i, 'hour').format('YYYY-MM-DD HH:00');
-            if (hourlyAverages[futureKey]) {
+          for (let j = 1; j <= 48; j++) {
+            const futureKey = h.add(j, 'hour').format('YYYY-MM-DD HH:00');
+            const future = hourlyAverages[futureKey];
+            if (future && future.speed !== null && future.dir !== null) {
               next = {
-                velocidad: hourlyAverages[futureKey].speed,
-                direccion: hourlyAverages[futureKey].dir,
+                velocidad: future.speed,
+                direccion: future.dir,
               };
               break;
             }
@@ -135,6 +127,7 @@ export default function App() {
               hora: h.format('HH'),
               direccion: ((parseFloat(prev.direccion) + next.direccion) / 2).toFixed(3),
               velocidad: ((parseFloat(prev.velocidad) + next.velocidad) / 2).toFixed(3),
+              interpolado: "Interpolado",
             });
           }
         }
