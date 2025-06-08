@@ -2,6 +2,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import dayjs, { Dayjs } from 'dayjs';
+import { Container, Typography, TextField, Button, Box } from '@mui/material';
 
 interface WindRecord {
   fecha: string;
@@ -22,6 +23,8 @@ interface ApiData {
 
 export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
+  const [year, setYear] = useState<number>(dayjs().year());
+  const [month, setMonth] = useState<number>(dayjs().month() + 1);
 
   const API_KEY = import.meta.env.VITE_API_KEY;
   const APP_KEY = import.meta.env.VITE_APP_KEY;
@@ -30,9 +33,8 @@ export default function App() {
   const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
   const handleExport = async () => {
-    const now = dayjs();
-    const endDate = now.startOf('day');
-    const startDate = endDate.subtract(3, 'day');
+    const startDate = dayjs(`${year}-${month.toString().padStart(2, '0')}-01`).startOf('day');
+    const endDate = startDate.endOf('month');
 
     setLoading(true);
     try {
@@ -136,7 +138,7 @@ export default function App() {
       const worksheet = XLSX.utils.json_to_sheet(filledRecords);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos viento');
-      XLSX.writeFile(workbook, `viento_${startDate.format('YYYY_MM_DD')}_a_${endDate.subtract(1, 'hour').format('YYYY_MM_DD')}.xlsx`);
+      XLSX.writeFile(workbook, `viento_${startDate.format('YYYY_MM_DD')}_a_${endDate.format('YYYY_MM_DD')}.xlsx`);
 
     } catch (err) {
       console.error('Error al obtener/exportar datos:', err);
@@ -146,15 +148,35 @@ export default function App() {
   };
 
   return (
-    <div className="p-8">
-      <h1 className="text-xl font-bold mb-4">Exportar viento (últimos 3 días)</h1>
-      <button
+    <Container maxWidth="sm" sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 8 }}>
+      <Typography variant="h5" fontWeight="bold" gutterBottom>
+        Exportar viento (mes completo)
+      </Typography>
+      <Box display="flex" gap={2} mb={2}>
+        <TextField
+          type="number"
+          label="Año"
+          value={year}
+          onChange={(e) => setYear(Number(e.target.value))}
+          fullWidth
+        />
+        <TextField
+          type="number"
+          label="Mes (1-12)"
+          value={month}
+          onChange={(e) => setMonth(Number(e.target.value))}
+          inputProps={{ min: 1, max: 12 }}
+          fullWidth
+        />
+      </Box>
+      <Button
+        variant="contained"
+        color="primary"
         onClick={handleExport}
-        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
         disabled={loading}
       >
         {loading ? 'Procesando...' : 'Generar Excel'}
-      </button>
-    </div>
+      </Button>
+    </Container>
   );
 }
