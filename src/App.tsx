@@ -2,17 +2,24 @@ import { useState } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 import dayjs, { Dayjs } from 'dayjs';
-import { Container, Typography, TextField, Button, Box } from '@mui/material';
+import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
+dayjs.extend(isSameOrAfter);
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import {
+  Container, Typography, Button, Box, Paper, Snackbar, Alert, MenuItem, Select, FormControl, InputLabel
+} from '@mui/material';
 
 interface WindRecord {
-  fecha: string;
-  año: string;
-  mes: string;
-  dia: string;
-  hora: string;
-  direccion: string;
-  velocidad: string;
-  interpolado: string;
+  Fecha: string;
+  Año: string;
+  Mes: string;
+  Día: string;
+  Hora: string;
+  Dirección: string;
+  Velocidad: string;
+  Interpolado: string;
 }
 
 interface ApiData {
@@ -21,26 +28,57 @@ interface ApiData {
   winddir: number;
 }
 
+const STATIONS: Record<string, string> = {
+  '': '',
+  'CISA LES': import.meta.env.VITE_MAC_CISA_LES,
+  'Santa Cruz 1': import.meta.env.VITE_MAC_SANTA_CRUZ_1,
+  'Santa Cruz 2': import.meta.env.VITE_MAC_SANTA_CRUZ_2,
+  'UPCO': import.meta.env.VITE_MAC_UPCO,
+};
+
 export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
-  const [year, setYear] = useState<number>(dayjs().year());
-  const [month, setMonth] = useState<number>(dayjs().month() + 1);
+  const [startDate, setStartDate] = useState<Dayjs>(dayjs().subtract(1, 'week').startOf('week'));
+  const [endDate, setEndDate] = useState<Dayjs>(dayjs().subtract(1, 'week').endOf('week'));
+  const [station, setStation] = useState<string>('');
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'success' }>({ open: false, message: '', severity: 'error' });
 
   const API_KEY = import.meta.env.VITE_API_KEY;
   const APP_KEY = import.meta.env.VITE_APP_KEY;
-  const MAC_ADDRESS = import.meta.env.VITE_MAC_ADDRESS;
 
   const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
   const handleExport = async () => {
-    const startDate = dayjs(`${year}-${month.toString().padStart(2, '0')}-01`).startOf('day');
-    const endDate = startDate.endOf('month');
+    const now = dayjs();
+    if (!startDate || !endDate) {
+      setSnackbar({ open: true, message: 'Seleccione ambas fechas.', severity: 'error' });
+      return;
+    }
+
+    if (!station) {
+      setSnackbar({ open: true, message: 'Seleccione una estación.', severity: 'error' });
+      return;
+    }
+
+    if (startDate.isSameOrAfter(endDate)) {
+      setSnackbar({ open: true, message: 'La fecha de inicio debe ser menor que la fecha de fin.', severity: 'error' });
+      return;
+    }
+
+    if (startDate.isSameOrAfter(now, 'day') || endDate.isSameOrAfter(now, 'day')) {
+      setSnackbar({ open: true, message: 'No se pueden seleccionar fechas actuales o futuras.', severity: 'error' });
+      return;
+    }
+
+    const adjustedStart = startDate.startOf('day');
+    const adjustedEnd = endDate.endOf('day');
 
     setLoading(true);
     try {
-      let allData: { date: string; timestamp: Dayjs; windspeed: number | null; winddir: number | null }[] = [];
-      for (let d = startDate; d.isBefore(endDate); d = d.add(1, 'day')) {
-        const url = `https://api.ambientweather.net/v1/devices/${MAC_ADDRESS}`;
+      let allRecords: WindRecord[] = [];
+
+      for (let d = adjustedStart; d.isBefore(adjustedEnd); d = d.add(1, 'day')) {
+        const url = `https://api.ambientweather.net/v1/devices/${station}`;
         const params = {
           apiKey: API_KEY,
           applicationKey: APP_KEY,
@@ -50,133 +88,161 @@ export default function App() {
 
         const response = await axios.get<ApiData[]>(url, { params });
 
-        const processed = response.data.map((d) => {
-          const ts = dayjs(d.date);
-          return {
-            date: d.date,
-            timestamp: ts,
-            windspeed: d.windspeedmph ?? null,
-            winddir: d.winddir ?? null,
-          };
+        const rawData = response.data.map((entry) => ({
+          timestamp: dayjs(entry.date),
+          windspeed: entry.windspeedmph ?? null,
+          winddir: entry.winddir ?? null,
+        }));
+
+        console.log(rawData);
+        
+        const hourlyMap: Record<string, typeof rawData> = {};
+        rawData.forEach((entry) => {
+          const hourKey = entry.timestamp.startOf('hour').format('YYYY-MM-DD HH:00');
+          if (!hourlyMap[hourKey]) hourlyMap[hourKey] = [];
+          hourlyMap[hourKey].push(entry);
         });
 
-        allData.push(...processed);
+        const hourlyAverages: Record<string, { ts: Dayjs; speed: number | null; dir: number | null }> = {};
+        for (const key in hourlyMap) {
+          const group = hourlyMap[key];
+          const ts = dayjs(key);
+
+          const validSpeed = group.map(e => e.windspeed).filter(v => v !== null) as number[];
+          const validDir = group.map(e => e.winddir).filter(v => v !== null) as number[];
+
+          const avgSpeed = validSpeed.length > 0 ? validSpeed.reduce((a, b) => a + b, 0) / validSpeed.length : null;
+          const avgDir = validDir.length > 0 ? validDir.reduce((a, b) => a + b, 0) / validDir.length : null;
+
+          hourlyAverages[key] = { ts, speed: avgSpeed, dir: avgDir };
+        }
+
+        let lastReal: { speed: number; dir: number } | null = null;
+        let pendingInterpolated: WindRecord[] = [];
+
+        for (let i = 0; i < 24; i++) {
+          const h = d.startOf('day').add(i, 'hour');
+          const key = h.format('YYYY-MM-DD HH:00');
+          const current = hourlyAverages[key];
+
+          if (current && current.speed !== null && current.dir !== null) {
+            if (lastReal && pendingInterpolated.length > 0) {
+              const avgSpeed = (lastReal.speed + current.speed) / 2;
+              const avgDir = (lastReal.dir + current.dir) / 2;
+
+              for (const p of pendingInterpolated) {
+                allRecords.push({
+                  ...p,
+                  Velocidad: avgSpeed.toFixed(3),
+                  Dirección: avgDir.toFixed(3),
+                  Interpolado: "Interpolado"
+                });
+              }
+              pendingInterpolated = [];
+            }
+
+            const record: WindRecord = {
+              Fecha: h.format('DD/MM/YYYY HH:mm'),
+              Año: h.format('YYYY'),
+              Mes: h.format('MM'),
+              Día: h.format('DD'),
+              Hora: h.format('HH'),
+              Dirección: current.dir.toFixed(3),
+              Velocidad: current.speed.toFixed(3),
+              Interpolado: "",
+            };
+            allRecords.push(record);
+            lastReal = { speed: current.speed, dir: current.dir };
+          } else {
+            if (lastReal) {
+              pendingInterpolated.push({
+                Fecha: h.format('DD/MM/YYYY HH:mm'),
+                Año: h.format('YYYY'),
+                Mes: h.format('MM'),
+                Día: h.format('DD'),
+                Hora: h.format('HH'),
+                Dirección: '',
+                Velocidad: '',
+                Interpolado: "Interpolado"
+              });
+            }
+          }
+        }
         await delay(1000);
       }
 
-      const hourlyMap: Record<string, typeof allData> = {};
-      allData.forEach((entry) => {
-        const hourKey = entry.timestamp.startOf('hour').format('YYYY-MM-DD HH:00');
-        if (!hourlyMap[hourKey]) hourlyMap[hourKey] = [];
-        hourlyMap[hourKey].push(entry);
-      });
-
-      const hourlyAverages: Record<string, { ts: Dayjs; speed: number | null; dir: number | null }> = {};
-      for (const key in hourlyMap) {
-        const group = hourlyMap[key];
-        const ts = dayjs(key);
-
-        const validSpeed = group.map(e => e.windspeed).filter(v => v !== null) as number[];
-        const validDir = group.map(e => e.winddir).filter(v => v !== null) as number[];
-
-        const avgSpeed = validSpeed.length > 0 ? validSpeed.reduce((a, b) => a + b, 0) / validSpeed.length : null;
-        const avgDir = validDir.length > 0 ? validDir.reduce((a, b) => a + b, 0) / validDir.length : null;
-
-        hourlyAverages[key] = { ts, speed: avgSpeed, dir: avgDir };
-      }
-
-      const filledRecords: WindRecord[] = [];
-      const totalHours = endDate.endOf('day').diff(startDate.startOf('hour'), 'hour');
-
-      for (let i = 0; i <= totalHours; i++) {
-        const h = startDate.startOf('hour').add(i, 'hour');
-        const key = h.format('YYYY-MM-DD HH:00');
-        const current = hourlyAverages[key];
-
-        if (current && current.speed !== null && current.dir !== null) {
-          filledRecords.push({
-            fecha: h.format('YYYY/MM/DD HH:mm'),
-            año: h.format('YYYY'),
-            mes: h.format('MM'),
-            dia: h.format('DD'),
-            hora: h.format('HH'),
-            direccion: current.dir.toFixed(3),
-            velocidad: current.speed.toFixed(3),
-            interpolado: "",
-          });
-        } else {
-          const prev = filledRecords[filledRecords.length - 1];
-          let next: { velocidad: number; direccion: number } | undefined;
-
-          for (let j = 1; j <= 48; j++) {
-            const futureKey = h.add(j, 'hour').format('YYYY-MM-DD HH:00');
-            const future = hourlyAverages[futureKey];
-            if (future && future.speed !== null && future.dir !== null) {
-              next = {
-                velocidad: future.speed,
-                direccion: future.dir,
-              };
-              break;
-            }
-          }
-
-          if (prev && next) {
-            filledRecords.push({
-              fecha: h.format('YYYY/MM/DD HH:mm'),
-              año: h.format('YYYY'),
-              mes: h.format('MM'),
-              dia: h.format('DD'),
-              hora: h.format('HH'),
-              direccion: ((parseFloat(prev.direccion) + next.direccion) / 2).toFixed(3),
-              velocidad: ((parseFloat(prev.velocidad) + next.velocidad) / 2).toFixed(3),
-              interpolado: "Interpolado",
-            });
-          }
-        }
-      }
-
-      const worksheet = XLSX.utils.json_to_sheet(filledRecords);
+      const worksheet = XLSX.utils.json_to_sheet(allRecords);
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos viento');
-      XLSX.writeFile(workbook, `viento_${startDate.format('YYYY_MM_DD')}_a_${endDate.format('YYYY_MM_DD')}.xlsx`);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos Viento');
+      XLSX.writeFile(workbook, `viento_${adjustedStart.format('YYYY_MM_DD')}_a_${adjustedEnd.format('YYYY_MM_DD')}.xlsx`);
+
+      setSnackbar({ open: true, message: 'Archivo exportado correctamente.', severity: 'success' });
 
     } catch (err) {
       console.error('Error al obtener/exportar datos:', err);
+      setSnackbar({ open: true, message: 'Ocurrió un error al exportar los datos.', severity: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Container maxWidth="sm" sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 8 }}>
-      <Typography variant="h5" fontWeight="bold" gutterBottom>
-        Exportar viento (mes completo)
-      </Typography>
-      <Box display="flex" gap={2} mb={2}>
-        <TextField
-          type="number"
-          label="Año"
-          value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
-          fullWidth
-        />
-        <TextField
-          type="number"
-          label="Mes (1-12)"
-          value={month}
-          onChange={(e) => setMonth(Number(e.target.value))}
-          inputProps={{ min: 1, max: 12 }}
-          fullWidth
-        />
-      </Box>
-      <Button
-        variant="contained"
-        color="primary"
-        onClick={handleExport}
-        disabled={loading}
-      >
-        {loading ? 'Procesando...' : 'Generar Excel'}
-      </Button>
-    </Container>
+    <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="es">
+      <Container maxWidth="md" sx={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <Paper elevation={3} sx={{ p: 6, width: '100%', maxWidth: 500, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            Exportar datos de viento
+          </Typography>
+          <Box display="flex" flexDirection="column" gap={3} mb={3} width="100%">
+            <FormControl fullWidth>
+              <InputLabel>Estación</InputLabel>
+              <Select
+                value={station}
+                label="Estación"
+                onChange={(e) => setStation(e.target.value)}
+              >
+                {Object.entries(STATIONS).map(([label, mac]) => (
+                  label ? <MenuItem key={mac} value={mac}>{label}</MenuItem> : null
+                ))}
+              </Select>
+            </FormControl>
+            <DatePicker
+              label="Fecha inicio"
+              format="DD/MM/YYYY"
+              value={startDate}
+              onChange={(newDate) => newDate && setStartDate(newDate.startOf('day'))}
+              slotProps={{ textField: { fullWidth: true } }}
+            />
+            <DatePicker
+              label="Fecha fin"
+              format="DD/MM/YYYY"
+              value={endDate}
+              onChange={(newDate) => newDate && setEndDate(newDate.endOf('day'))}
+              slotProps={{ textField: { fullWidth: true } }}
+            />
+          </Box>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleExport}
+            disabled={loading}
+            size="large"
+            fullWidth
+          >
+            {loading ? 'Procesando...' : 'Generar Excel'}
+          </Button>
+        </Paper>
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={6000}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
+      </Container>
+    </LocalizationProvider>
   );
 }
