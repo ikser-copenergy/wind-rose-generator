@@ -8,7 +8,7 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import {
-  Container, Typography, Button, Box, Paper, Snackbar, Alert, MenuItem, Select, FormControl, InputLabel
+  Container, Typography, Button, Box, Paper, Snackbar, Alert, MenuItem, Select, FormControl, InputLabel, TextField
 } from '@mui/material';
 
 interface WindRecord {
@@ -36,17 +36,24 @@ const STATIONS: Record<string, string> = {
   'UPCO': import.meta.env.VITE_MAC_UPCO,
 };
 
+const referenceHeight = 11;
+
 export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [startDate, setStartDate] = useState<Dayjs>(dayjs().subtract(1, 'week').startOf('week'));
   const [endDate, setEndDate] = useState<Dayjs>(dayjs().subtract(1, 'week').endOf('week'));
   const [station, setStation] = useState<string>('');
+  const [newHeight, setNewHeight] = useState<number>(11);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'success' }>({ open: false, message: '', severity: 'error' });
 
   const API_KEY = import.meta.env.VITE_API_KEY;
   const APP_KEY = import.meta.env.VITE_APP_KEY;
 
   const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+  const changeStationHeight = (windSpeed: number) => {
+    return windSpeed * (newHeight / referenceHeight) ** 0.2;
+  };
 
   const handleExport = async () => {
     const now = dayjs();
@@ -94,8 +101,6 @@ export default function App() {
           winddir: entry.winddir ?? null,
         }));
 
-        console.log(rawData);
-        
         const hourlyMap: Record<string, typeof rawData> = {};
         rawData.forEach((entry) => {
           const hourKey = entry.timestamp.startOf('hour').format('YYYY-MM-DD HH:00');
@@ -133,7 +138,7 @@ export default function App() {
               for (const p of pendingInterpolated) {
                 allRecords.push({
                   ...p,
-                  Velocidad: avgSpeed.toFixed(3),
+                  Velocidad: changeStationHeight(avgSpeed).toFixed(3),
                   Dirección: avgDir.toFixed(3),
                   Interpolado: "Interpolado"
                 });
@@ -148,7 +153,7 @@ export default function App() {
               Día: h.format('DD'),
               Hora: h.format('HH'),
               Dirección: current.dir.toFixed(3),
-              Velocidad: current.speed.toFixed(3),
+              Velocidad: changeStationHeight(current.speed).toFixed(3),
               Interpolado: "",
             };
             allRecords.push(record);
@@ -219,6 +224,19 @@ export default function App() {
               value={endDate}
               onChange={(newDate) => newDate && setEndDate(newDate.endOf('day'))}
               slotProps={{ textField: { fullWidth: true } }}
+            />
+            <TextField
+              label="Altura de referencia (m)"
+              value={referenceHeight}
+              InputProps={{ readOnly: true }}
+              fullWidth
+            />
+            <TextField
+              label="Altura deseada (m)"
+              type="number"
+              value={newHeight}
+              onChange={(e) => setNewHeight(parseFloat(e.target.value))}
+              fullWidth
             />
           </Box>
           <Button
