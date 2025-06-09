@@ -1,11 +1,11 @@
 import type { ExportStrategy } from "./ExportStrategy";
-import type { WindRecord } from "../types/WindRecord";
+import type { WindRecord, WRPlotHeader } from "../types/WindRecord";
 import generateWRPlotFile from "../utils/generateWRPlotFile";
 import dayjs from "dayjs";
 
 export class WRPlotExportStrategy implements ExportStrategy {
   export(data: WindRecord[]): void {
-    const header = {
+    const header:WRPlotHeader = {
       id: 1,
       name: "LA ESPERANZA",
       countryCode: "IN",
@@ -14,7 +14,6 @@ export class WRPlotExportStrategy implements ExportStrategy {
       longitude: "W180 00",
       altitude: 1700,
     };
-
     const wrPlotData = data
       .map((r) => ({
         ts: dayjs(`${r.Año}-${r.Mes}-${r.Día} ${r.Hora}:00`),

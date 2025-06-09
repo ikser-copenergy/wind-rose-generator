@@ -1,6 +1,9 @@
 import axios from "axios";
 import dayjs, { Dayjs } from "dayjs";
 import type { WindRecord } from "../types/WindRecord";
+import utc from "dayjs/plugin/utc";
+
+dayjs.extend(utc);
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
@@ -38,7 +41,7 @@ export async function fetchAndProcessWindData(
     const response = await axios.get<ApiData[]>(url, { params });
 
     const rawData = response.data.map((entry) => ({
-      timestamp: dayjs(entry.date),
+      timestamp: dayjs(entry.date).utcOffset(-360),
       windspeed: entry.windspeedmph ?? null,
       winddir: entry.winddir ?? null,
     }));

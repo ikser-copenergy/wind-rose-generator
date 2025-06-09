@@ -1,10 +1,12 @@
 import type dayjs from "dayjs";
+import type { WRPlotHeader } from "../types/WindRecord";
 
 interface WRPlotRecord {
   ts: dayjs.Dayjs;
   dir: number;
   speed: number;
 }
+
 
 function formatWRPlotLine(record: WRPlotRecord): string {
   const y = record.ts.year() % 100;
@@ -27,11 +29,11 @@ function formatWRPlotLine(record: WRPlotRecord): string {
   );
 }
 
-function generateWRPlotFile(data: WRPlotRecord[]): void {
-  const headerLines = [
-    `~    1 LA ESPERANZA           IN  -6  N14 09  W180 00  1700`,
-    `~YR MO DA HR I    1    2       3       4       5  6  7     8     9  10   11  12    13     14     15        16   17     18   19  20      21`
-  ];
+function generateWRPlotFile(data: WRPlotRecord[], header: WRPlotHeader): void {
+  const line1 = `~    ${header.id.toString().padStart(1)} ${header.name.padEnd(24)}${header.countryCode.padStart(3)} ${header.timezone.toString().padStart(3)}  ${header.latitude}  ${header.longitude}  ${header.altitude.toString().padStart(4)}`;
+  const line2 = `~YR MO DA HR I    1    2       3       4       5  6  7     8     9  10   11  12    13     14     15        16   17     18   19  20      21`;
+
+  const headerLines = [line1, line2];
 
   const body = data.map(formatWRPlotLine);
 
