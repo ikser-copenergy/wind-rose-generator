@@ -1,6 +1,5 @@
 import type { Dayjs } from 'dayjs';
-import { saveAs } from 'file-saver'; // Asegúrate de instalarlo si no lo tienes: npm install file-saver
-
+import { saveAs } from 'file-saver';
 interface WRPlotHeader {
   id: number;
   name: string;

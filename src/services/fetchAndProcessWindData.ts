@@ -7,10 +7,10 @@ dayjs.extend(utc);
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
-const referenceHeight = 11.8;
+const referenceHeight = 11.88;
 
 const changeStationHeight = (windSpeed: number, newHeight: number) => {
-  return windSpeed * (newHeight / referenceHeight) ** 0.2;
+  return windSpeed * ( (newHeight / referenceHeight) ** 0.25 );
 };
 
 interface ApiData {
@@ -39,10 +39,10 @@ export async function fetchAndProcessWindData(
     };
 
     const response = await axios.get<ApiData[]>(url, { params });
-
+    const mphToMps = 2.23694;//Constante de conversion de millas por hora a metros por segundo
     const rawData = response.data.map((entry) => ({
       timestamp: dayjs(entry.date).utcOffset(-360),
-      windspeed: entry.windspeedmph ?? null,
+      windspeed: (entry.windspeedmph ?? null)/mphToMps,
       winddir: entry.winddir ?? null,
     }));
 
@@ -118,7 +118,7 @@ export async function fetchAndProcessWindData(
         }
       }
     }
-    await delay(1000);
+    await delay(500);
   }
 
   return allRecords;

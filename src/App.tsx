@@ -29,7 +29,7 @@ export default function App() {
   const [startDate, setStartDate] = useState<Dayjs>(dayjs().subtract(1, "week").startOf("week"));
   const [endDate, setEndDate] = useState<Dayjs>(dayjs().subtract(1, "week").endOf("week"));
   const [station, setStation] = useState("");
-  const [newHeight, setNewHeight] = useState(11.8);
+  const [newHeight, setNewHeight] = useState(11.88);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "error" as "error" | "success" });
 
   const API_KEY = import.meta.env.VITE_API_KEY;
@@ -113,7 +113,7 @@ export default function App() {
 
             <TextField
               label="Altura de referencia (m)"
-              value={11.8}
+              value={11.88}
               InputProps={{ readOnly: true }}
               fullWidth
               disabled
