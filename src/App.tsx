@@ -35,6 +35,9 @@ export default function App() {
   const API_KEY = import.meta.env.VITE_API_KEY;
   const APP_KEY = import.meta.env.VITE_APP_KEY;
 
+  const API_KEY_UPCO = import.meta.env.VITE_API_KEY_UPCO;
+  const APP_KEY_UPCO = import.meta.env.VITE_APP_KEY_UPCO;
+
   const handleExport = async (strategy: ExportStrategy) => {
     if (!startDate || !endDate) {
       setSnackbar({ open: true, message: "Seleccione ambas fechas.", severity: "error" });
@@ -57,6 +60,14 @@ export default function App() {
       return;
     }
 
+    // Determinar si la estación seleccionada es UPCO
+    const isUPCO = Object.entries(STATIONS).find(
+      ([label, mac]) => mac === station && label === "UPCO"
+    );
+
+    const selectedApiKey = isUPCO ? API_KEY_UPCO : API_KEY;
+    const selectedAppKey = isUPCO ? APP_KEY_UPCO : APP_KEY;
+
     setLoading(true);
     try {
       const data: WindRecord[] = await fetchAndProcessWindData(
@@ -64,8 +75,8 @@ export default function App() {
         startDate.startOf("day"),
         endDate.endOf("day"),
         newHeight,
-        API_KEY,
-        APP_KEY
+        selectedApiKey,
+        selectedAppKey
       );
 
       await strategy.export(data, startDate.format("YYYY-MM-DD"), endDate.format("YYYY-MM-DD"));
@@ -77,6 +88,7 @@ export default function App() {
       setLoading(false);
     }
   };
+
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="es">
